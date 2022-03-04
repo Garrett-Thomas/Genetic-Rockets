@@ -11,11 +11,10 @@ protected:
 
 public:
   Object() = default;
-  virtual ~Object() = default;
-
   virtual void drawObject(sf::RenderWindow &window) = 0;
   virtual void applyUpwardForce(){};
   virtual void applySideForce(bool left){};
+ virtual void update(){};
 };
 
 #endif
