@@ -8,9 +8,9 @@
 class DNA {
 
 private:
-  const int numVectors = 3;
-  const int maxMagnitude = 1000;
-  const float sideVecDamping = maxMagnitude * 0.03f;
+  const int NUM_VECTORS = 3;
+  const int MAX_MAGNITUDE = 1000;
+  const float sideVecDamping = MAX_MAGNITUDE * 0.03f;
   int dnaSize;
   double mass;
 
@@ -18,16 +18,9 @@ public:
   b2Vec2 **dna;
   DNA(int dS, double m) : dnaSize(dS), mass(m) {
 
-    std::random_device rd;
-    std::default_random_engine generator(rd());
-    std::uniform_real_distribution<double> bottomVec(0, mass * sideVecDamping);
+    this->dna = new b2Vec2 *[NUM_VECTORS];
 
-    std::uniform_real_distribution<double> sideVec(
-        -1 * (maxMagnitude) / sideVecDamping, maxMagnitude / sideVecDamping);
-
-    this->dna = new b2Vec2 *[numVectors];
-
-    for (int i = 0; i < numVectors; ++i) {
+    for (int i = 0; i < NUM_VECTORS; ++i) {
 
       this->dna[i] = new b2Vec2[dnaSize];
 
@@ -35,30 +28,57 @@ public:
 
         if (i == 0) {
 
-          this->dna[i][j] = b2Vec2(-1 * abs(sideVec(generator)), 0);
+          this->dna[i][j] = randomVector(i);
         }
 
         else if (i == 1) {
 
-          this->dna[i][j] = b2Vec2(abs(sideVec(generator)), 0);
-        } else {
+          this->dna[i][j] = randomVector(i); 
+        } 
+        else {
 
-          this->dna[i][j] = b2Vec2(bottomVec(generator), bottomVec(generator));
+          this->dna[i][j] = randomVector(i); 
         }
       }
     }
-  }
-    DNA(int ds) {
+  } 
 
-    this->dna = new b2Vec2 *[numVectors];
-    for (int i = 0; i < numVectors; ++i) {
-      this->dna[i] = new b2Vec2[dnaSize];
+  // Type meaning where the vector will add force to on the rocket (up, left, right)
+  b2Vec2 randomVector(int type){
+
+    std::random_device rd;
+    std::default_random_engine generator(rd());
+    std::uniform_real_distribution<double> bottomVec(0, mass * sideVecDamping);
+
+    std::uniform_real_distribution<double> sideVec(
+        -1 * (MAX_MAGNITUDE) / sideVecDamping, MAX_MAGNITUDE / sideVecDamping);
+
+    switch(type){
+        case 0:
+        return b2Vec2(-1 * abs(sideVec(generator)), 0);
+        break;
+        case 1:
+        return b2Vec2(abs(sideVec(generator)), 0);
+        break;
+        case 2: 
+        return b2Vec2(bottomVec(generator), bottomVec(generator));
+        break;
+        default:
+        return b2Vec2(0, 0);
+    }
+
+  }
+
+  DNA(int dS) {
+    this->dna = new b2Vec2 *[NUM_VECTORS];
+    for (int i = 0; i < NUM_VECTORS; ++i) {
+      this->dna[i] = new b2Vec2[dS];
     }
   }
   // Cleanup
   ~DNA() {
 
-    for (int i = 0; i < numVectors; ++i) {
+    for (int i = 0; i < NUM_VECTORS; ++i) {
       delete[] dna[i];
     }
     delete[] dna;

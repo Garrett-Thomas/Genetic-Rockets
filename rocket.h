@@ -25,6 +25,7 @@ private:
   DNA *dna;
 
 public:
+
   Rocket(int vL, int x, int y, b2World *wrld, uint16 categoryBits,
          uint16 maskBits)
       : vecLength(vL), world(wrld) {
@@ -65,10 +66,19 @@ public:
     dna = new DNA(vecLength, rocketBody->GetMass());
   }
 
-  ~Rocket() { delete dna; }
-  void setDna(DNA *na){
-        delete dna;
-        dna = na;
+  ~Rocket() {
+
+    world->DestroyBody(rocketBody);
+    delete dna;
+  }
+
+  DNA *getDna(){
+      return dna;
+  }
+
+  void setDna(DNA *na) {
+    delete dna;
+    dna = na;
   }
 
   void drawObject(sf::RenderWindow &window) {
@@ -111,13 +121,31 @@ public:
                  -1 * roundf(y * dna->dna[2][lifecount].y)),
           true);
 
-      // rocketBody->ApplyForceToCenter(dna->dna[2][lifecount], true);
-
-      // std::cout << std::endl << rocketBody->GetWorldCenter().x;
-      //    Calc fitness;
       ++lifecount;
     }
     lifecount = lifecount % vecLength;
+  }
+
+  void calcFitness(int targetX, int &targetY) {
+    // Time to target needs to be calculated into the fitness value
+    if (lifecount > 0) {
+      double fit =
+          sqrt(pow(targetX - (rocketBody->GetWorldCenter().x * SCALE), 2) +
+               pow(targetY - (rocketBody->GetWorldCenter().y * SCALE), 2));
+
+      fit = (1.f / fit) * 1000;
+
+      // timeValue should be high when the rocket is close to target and
+      // got there quickly
+      double timeValue = ((1.f / (float)lifecount)) * fit;
+
+     // if (fit + timeValue > this->fitness) {
+     //   this->fitness = fit + timeValue;
+     // }
+
+      this->fitness = fit + timeValue;
+      //std::cout << fit << " * " << timeValue << std::endl;
+    }
   }
   void setFitness(double ft) { fitness = ft; }
   double getFitness() { return fitness; }
@@ -138,9 +166,12 @@ public:
     delete point;
   }
 
-  DNA* breed(Rocket *parent) {
+  DNA *breed(Rocket *parent) {
 
-    DNA* childDna = new DNA(vecLength);
+    std::random_device rd;
+    std::default_random_engine generator(rd());
+    std::uniform_real_distribution<double> mutation(0, 1);
+    DNA *childDna = new DNA(vecLength);
 
     for (int i = 0; i < inputFields; ++i) {
 
@@ -150,14 +181,12 @@ public:
         if (midpoint < i) {
 
           childDna->dna[i][j] = parent->dna->dna[i][j];
-        } 
-        else if ((float)rand() / RAND_MAX <= 0.10) {
+        } else if (mutation(generator) <= 0.01f) {
 
-          childDna->dna[i][j] = (parent->dna->dna[i][j].Skew());
-        } 
+          childDna->dna[i][j] = parent->dna->randomVector(i);
+        }
 
         else {
-
           childDna->dna[i][j] = dna->dna[i][j];
         }
       }
