@@ -1,0 +1,7 @@
+{
+	"name": "npm",
+	"scripts": {
+		"compileWASM": "eval emcc  -v src/main.c -O3 --profiling -s TOTAL_MEMORY=671088640 -sASYNCIFY -sUSE_GLFW=3  -Iexternal/ -Iexternal/raygui/ -Iexternal/raylib/include -o web/drone.html --shell-file shell.html external/novaphysics/lib/libnova.a external/raylib/lib/libraylib.a"
+	},
+	"license": "ISC"
+}

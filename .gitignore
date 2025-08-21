@@ -1,2 +1,8 @@
 .DS_STORE
 .ccls-cache/
+.vscode/
+code/
+node_modules/
+package-lock.json
+
+ignore/

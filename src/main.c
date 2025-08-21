@@ -1,5 +1,3 @@
-#include <box2d/box2d.h>
-
 #define RAYGUI_IMPLEMENTATION
 #include <raylib.h>
 #include "raygui.h"
@@ -8,22 +6,27 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#define PLATFORM_WEB
+
+#ifdef PLATFORM_WEB
+#include <emscripten.h>
+#endif
 
 #define MENU_HEIGHT 100
-#define DNA_SIZE 800
+#define DNA_SIZE 450 
 #define ROCKET_SIZE 25
-#define NUM_ROCKETS 100
-#define ROCKET_WIDTH 10
-#define ROCKET_HEIGHT 30
-#define SCREEN_WIDTH 700
-#define SCREEN_HEIGHT 700
+#define NUM_ROCKETS 100 
+#define ROCKET_WIDTH 20
+#define ROCKET_HEIGHT 20
+#define SCREEN_WIDTH 600
+#define SCREEN_HEIGHT 600
 #define ROCKETBITS 0x000000002
 #define OBSTACLEBITS 0x00000004
 #define NUM_SUPER_CLONES 5
-#define NUM_SURE_MUTATIONS 10
-#define PERCENT_MUTATED 0.75f
+#define NUM_SURE_MUTATIONS 0
+#define PERCENT_MUTATED 0.10f
 #define MUTATION_SIZE 9000
-#define MAX_FORCE 30000
+#define MAX_FORCE 50000
 #define LATERAL_MAX 50000
 #define DEBUG 0
 #define TARGET_SIZE 12
@@ -38,11 +41,8 @@ struct Target
 };
 struct Rocket
 {
-    struct Target *targ;
-    b2BodyDef bodyDef;
-    b2BodyId bodyId;
-    b2ShapeDef shapeDef;
-    b2Polygon rectBox;
+    nvShape *shape;
+    nvRigidBody *bod;
 
     double dna[DNA_SIZE * 2];
     int width;
@@ -51,9 +51,16 @@ struct Rocket
     double fitness;
 };
 
-struct Rocket **allRockets;
+static struct Rocket **allRockets;
 struct Target targ;
 static int generation;
+static int count;
+static float speed;
+static nvSpace *space;
+static struct Rocket *tester;
+
+
+
 double randNum(int min, int max)
 {
     return rand() % (max - min + 1) + min;
@@ -101,7 +108,7 @@ void mutateDNA(double *arr1, double *arr2, double *arr3, int len)
         {
             arr1[i] = arr2[i];
         }
-        if (rand() % 30 == 0)
+        if (rand() % 300 == 0)
         {
             if (i % 2 == 0)
             {
@@ -178,16 +185,13 @@ void rocketUpdate()
     for (int i = 0; i < NUM_ROCKETS; i++)
     {
 
-        b2Vec2 pos = b2Body_GetPosition(allRockets[i]->bodyId);
+        nvVector2 pos = nvRigidBody_get_position(allRockets[i]->bod);
 
-        b2BodyId rockBod = allRockets[i]->bodyId;
-
-        float angle = b2Rot_GetAngle(b2Body_GetRotation(allRockets[i]->bodyId));
-
+        float angle = nvRigidBody_get_angle(allRockets[i]->bod);
         float y = sin(angle);
         float x = cos(angle);
 
-        allRockets[i]->fitness = 1.0f / (sqrt(pow(allRockets[i]->targ->x - pos.x + (x * (ROCKET_HEIGHT / 2)), 2) + pow(allRockets[i]->targ->y - pos.y + (y * (ROCKET_HEIGHT / 2)), 2)));
+        allRockets[i]->fitness = 1.0f / (sqrt(pow(targ.x - pos.x + (x * (ROCKET_HEIGHT / 2)), 2) + pow(targ.y - pos.y + (y * (ROCKET_HEIGHT / 2)), 2)));
 
         double timeValue = (1.0f / allRockets[i]->lifecount) * allRockets[i]->fitness;
         allRockets[i]->fitness += timeValue;
@@ -196,11 +200,11 @@ void rocketUpdate()
 
         float torque = allRockets[i]->dna[lifecount * 2];
 
-        b2Vec2 force = {y * allRockets[i]->dna[(lifecount * 2) + 1], -1 * x * allRockets[i]->dna[(lifecount * 2) + 1]};
-        b2Vec2 point = {pos.x, pos.y};
+        nvVector2 force = {y * allRockets[i]->dna[(lifecount * 2) + 1], -1 * x * allRockets[i]->dna[(lifecount * 2) + 1]};
 
-        b2Body_ApplyTorque(rockBod, torque, true);
-        b2Body_ApplyForce(rockBod, force, point, true);
+        nvRigidBody_apply_force(allRockets[i]->bod, force);
+        nvRigidBody_apply_torque(allRockets[i]->bod, torque);
+
     }
 }
 
@@ -209,7 +213,8 @@ void rocketDraw()
 
     for (int i = NUM_ROCKETS - 1; i >= 0; i--)
     {
-        b2Vec2 pos = b2Body_GetPosition(allRockets[i]->bodyId);
+
+        nvVector2 pos = nvRigidBody_get_position(allRockets[i]->bod);
 
         Color color = BLACK;
         if(i < NUM_SUPER_CLONES && generation > 1){
@@ -218,8 +223,7 @@ void rocketDraw()
 
         }
 
-
-        DrawRectanglePro((Rectangle){pos.x, pos.y, allRockets[i]->width, allRockets[i]->height}, (Vector2){allRockets[i]->width / 2, allRockets[i]->height / 2}, b2Rot_GetAngle(b2Body_GetRotation(allRockets[i]->bodyId)) * (180.f / PI), color);
+        DrawRectanglePro((Rectangle){pos.x, pos.y, allRockets[i]->width, allRockets[i]->height}, (Vector2){allRockets[i]->width / 2, allRockets[i]->height / 2}, nvRigidBody_get_angle(allRockets[i]->bod), color);
     }
 }
 void drawTarget()
@@ -232,82 +236,73 @@ void drawTarget()
     DrawRectangle(targ.x - (TARGET_SIZE / 4.f), targ.y - (TARGET_SIZE / 4.f), TARGET_SIZE / 2.f, TARGET_SIZE / 2.f, RED);
 
 }
-void makeRocket(struct Rocket *rock, b2WorldId *worldId, struct Target *targ, bool makeDNA)
+void makeRocket(struct Rocket *rock, nvSpace *space, bool makeDNA)
 {
 
     if (makeDNA)
     {
-        gen_random_numbers(rock->dna, DNA_SIZE * 2, -MAX_FORCE, MAX_FORCE);
+        gen_random_numbers(rock->dna, DNA_SIZE * 2, -MAX_FORCE / 4, MAX_FORCE);
     }
-    rock->targ = targ;
+    nvRigidBodyInitializer body_init = nvRigidBodyInitializer_default;
+    body_init.type = nvRigidBodyType_DYNAMIC;
+    body_init.position = NV_VECTOR2(ROCKET_X, ROCKET_Y);
+    body_init.material = (nvMaterial){.density=1.0, .restitution=0.0, .friction=0.1};
+    rock->bod = nvRigidBody_new(body_init);
+    nvRigidBody_set_collision_group(rock->bod, 1);
+    rock->shape = nvRectShape_new(ROCKET_WIDTH, ROCKET_HEIGHT, nvVector2_zero);
 
-    rock->bodyDef = b2DefaultBodyDef();
-    rock->bodyDef.type = b2_dynamicBody;
-    rock->bodyDef.position = (b2Vec2){ROCKET_X, ROCKET_Y};
-
-    rock->bodyId = b2CreateBody(*worldId, &rock->bodyDef);
-
-    rock->shapeDef = b2DefaultShapeDef();
-    rock->shapeDef.density = 1.0f;
-    rock->shapeDef.friction = 0.3f;
-    rock->shapeDef.filter.categoryBits = ROCKETBITS;
-    rock->shapeDef.filter.maskBits = OBSTACLEBITS;
-
-    rock->rectBox = b2MakeBox(ROCKET_WIDTH / 2.0f, ROCKET_HEIGHT / 2.0f);
-    b2CreatePolygonShape(rock->bodyId, &rock->shapeDef, &rock->rectBox);
+    nvRigidBody_add_shape(rock->bod, rock->shape);
+    nvSpace_add_rigidbody(space, rock->bod);
     rock->width = ROCKET_WIDTH;
     rock->height = ROCKET_HEIGHT;
     rock->lifecount = 0;
     rock->fitness = 0.f;
 }
 
-void resetRockets(struct Target *targ, b2WorldId worldId)
+void resetRockets()
 {
     for (int i = 0; i < NUM_ROCKETS; i++)
     {
 
         allRockets[i]->fitness = 0;
         allRockets[i]->lifecount = 0;
-        b2Body_SetAngularVelocity(allRockets[i]->bodyId, 0.f);
-        b2Body_SetLinearVelocity(allRockets[i]->bodyId, (b2Vec2){0, 0});
-
-        // double currAngle = b2Rot_GetAngle(b2Body_GetRotation(allRockets[i]->bodyId));
-        b2Body_SetTransform(allRockets[i]->bodyId, (b2Vec2){ROCKET_X, ROCKET_Y}, b2MakeRot(0));
+        nvRigidBody_set_angle(allRockets[i]->bod, 0.0f);
+        nvRigidBody_set_linear_velocity(allRockets[i]->bod, nvVector2_zero);
+        nvRigidBody_set_angular_velocity(allRockets[i]->bod, 0);
+        nvRigidBody_set_position(allRockets[i]->bod, (nvVector2) {ROCKET_X, ROCKET_Y});
     }
 }
 void right(struct Rocket *rock)
 {
 
-    b2Vec2 pos = b2Body_GetPosition(rock->bodyId);
 
-    b2Body_ApplyTorque(rock->bodyId, 100000, true);
+    
+    nvRigidBody_apply_torque(rock->bod, 50000);
 }
 void left(struct Rocket *rock)
 {
 
-    b2Vec2 pos = b2Body_GetPosition(rock->bodyId);
 
-    b2Body_ApplyTorque(rock->bodyId, -100000, true);
+     nvRigidBody_apply_torque(rock->bod, -50000);
 }
+
 void up(struct Rocket *rock)
 {
 
-    float angle = b2Rot_GetAngle(b2Body_GetRotation(rock->bodyId));
 
-    b2Vec2 pos = b2Body_GetPosition(rock->bodyId);
+    float angle = nvRigidBody_get_angle(rock->bod);
 
     float y = sin(angle);
     float x = cos(angle);
 
-    printf("x: %f, y:%f\n", pos.x, pos.y);
-    b2Body_ApplyForce(rock->bodyId, (b2Vec2){y * 10000, x * -10000}, (b2Vec2){pos.x, pos.y}, true);
+    nvRigidBody_apply_force(rock->bod, (nvVector2){y * 10000, x * -10000});
 }
 void drawTester(struct Rocket *rock)
 {
 
-    b2Vec2 pos = b2Body_GetPosition(rock->bodyId);
+    nvVector2 pos = nvRigidBody_get_position(rock->bod);
 
-    DrawRectanglePro((Rectangle){pos.x, pos.y, rock->width, rock->height}, (Vector2){rock->width / 2, rock->height / 2}, b2Rot_GetAngle(b2Body_GetRotation(rock->bodyId)) * (180.f / PI), GREEN);
+    DrawRectanglePro((Rectangle){pos.x, pos.y, rock->width, rock->height}, (Vector2){rock->width / 2, rock->height / 2}, nvRigidBody_get_angle(rock->bod) * (180.f / PI), GREEN);
 }
 
 void setRandomTarget(struct Target *targ){
@@ -319,54 +314,7 @@ void setRandomTarget(struct Target *targ){
 
 }
 
-
-int main()
-{
-    nvSpace *space = nvSpace_new();
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Genetic Rockets");
-
-    SetTargetFPS(60);
-
-    generation = 1;
-
-    setRandomTarget(&targ);
-
-
-    b2WorldDef worldDef = b2DefaultWorldDef();
-    worldDef.gravity = (b2Vec2){0.0f, 10.0f};
-    b2WorldId worldId = b2CreateWorld(&worldDef);
-
-    allRockets = malloc((NUM_ROCKETS * sizeof(struct Rocket *)) + 1);
-
-    struct Rocket *tester = malloc(sizeof(struct Rocket));
-    makeRocket(tester, &worldId, &targ, 1);
-
-    for (int i = 0; i < NUM_ROCKETS; i++)
-    {
-
-        allRockets[i] = malloc(sizeof(struct Rocket));
-
-        makeRocket(allRockets[i], &worldId, &targ, 1);
-    }
-
-    b2Body_SetTransform(tester->bodyId, (b2Vec2) {500, ROCKET_Y}, b2MakeRot(0));
-    b2BodyDef groundBodyDef = b2DefaultBodyDef();
-    groundBodyDef.position = (b2Vec2){SCREEN_WIDTH / 2, SCREEN_HEIGHT - (GROUND_HEIGHT / 2)};
-    groundBodyDef.type = b2_staticBody;
-    b2BodyId groundId = b2CreateBody(worldId, &groundBodyDef);
-    b2Polygon groundBox = b2MakeBox(SCREEN_WIDTH, GROUND_HEIGHT / 2);
-
-    b2ShapeDef groundShapeDef = b2DefaultShapeDef();
-
-    groundShapeDef.filter.categoryBits = OBSTACLEBITS;
-
-    b2CreatePolygonShape(groundId, &groundShapeDef, &groundBox);
-    int count = 0;
-    float speed = 2.0f;
-
-    while (!WindowShouldClose())
-    {
-
+void updateDrawFrame(){
         if (IsKeyDown(KEY_RIGHT))
             right(tester);
         if (IsKeyDown(KEY_LEFT))
@@ -376,38 +324,37 @@ int main()
 
         if (count + 1 < DNA_SIZE)
         {
-            b2World_Step(worldId, 1.0f / 60.f, 4);
+            nvSpace_step(space, 1.0f / 60.0f);
             rocketUpdate();
 
-            drawTester(tester);
             if (count % (int)speed == 0)
             {
 
                 BeginDrawing();
                 ClearBackground(RAYWHITE);
-
+                drawTester(tester);
                 rocketDraw();
-           
-
                 DrawRectangle(0, 0, SCREEN_WIDTH, MENU_HEIGHT, GRAY);
-                char buffer[50]; // Adjust size as needed
+                char buffer[50];  
                 snprintf(buffer, sizeof(buffer), "%s%d", "Generation: ", generation);
-
                 GuiSetStyle(DEFAULT, TEXT_SIZE, 20);
                 GuiSetStyle(DEFAULT, TEXT_COLOR_NORMAL, 0x33FFFF);
-                GuiSliderBar((Rectangle){(SCREEN_WIDTH / 2) + 150, 20, 100, 40}, "Speed", TextFormat(" %.0fx", speed), &speed, 1, 16);    
+
+                #ifndef PLATFORM_WEB
+                GuiSliderBar((Rectangle){(SCREEN_WIDTH / 2) + 150, 20, 100, 40}, "Speed", TextFormat(" %.0fx", speed), &speed, 1, 4);
+                #endif
+
                 if(GuiButton((Rectangle){200, 20, 200, 70}, "Change Target")){
 
                     setRandomTarget(&targ);
-                    resetRockets(&targ, worldId);
+                    resetRockets();
                     generation = 1;
                     count = -1;
 
                 }
                 DrawText(buffer, 20, 30, 20, ORANGE);
-
                 DrawRectangle(0, SCREEN_HEIGHT - GROUND_HEIGHT, SCREEN_WIDTH, GROUND_HEIGHT, GetColor(0x006400ff));
-     drawTarget();
+                drawTarget();
                 EndDrawing();
             }
         }
@@ -415,17 +362,74 @@ int main()
         {
             generation++;
             breedNewRockets(allRockets);
-            resetRockets(&targ, worldId);
+            resetRockets();
             count = -1;
         }
         count++;
+
+}
+
+int main()
+{
+    space = nvSpace_new();
+    srand(time(NULL));
+    // Trying to improve performance
+    // Profiler says most time is spent in the hashmap 
+    // implementation of nova physics.
+    nvSpace_get_settings(space)->position_iterations = 1;
+    nvSpace_get_settings(space)->substeps = 1;
+    nvSpace_set_gravity(space, (nvVector2) {0.0f, 10.0f});
+
+    //SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Genetic Rockets");
+
+
+    generation = 1;
+    count = 0;
+    speed = 1.0f;
+    setRandomTarget(&targ);
+
+    allRockets = malloc((NUM_ROCKETS * sizeof(struct Rocket *)) + 1);
+
+    tester = malloc(sizeof(struct Rocket));
+    makeRocket(tester, space, 1);
+
+    for (int i = 0; i < NUM_ROCKETS; i++)
+    {
+
+        allRockets[i] = malloc(sizeof(struct Rocket));
+
+        makeRocket(allRockets[i], space, 1);
     }
-    b2DestroyWorld(worldId);
+    nvRigidBody_set_position(tester->bod, (nvVector2){500, ROCKET_Y});
+    nvRigidBodyInitializer body_init = nvRigidBodyInitializer_default;
+    body_init.type = nvRigidBodyType_STATIC;
+    body_init.position = NV_VECTOR2(SCREEN_WIDTH / 2, SCREEN_HEIGHT - (GROUND_HEIGHT / 2));
+    body_init.material = nvMaterial_CONCRETE; 
+    nvRigidBody *ground = nvRigidBody_new(body_init);
+
+    nvRigidBody_add_shape(ground, nvRectShape_new(SCREEN_WIDTH, GROUND_HEIGHT, nvVector2_zero));
+    nvSpace_add_rigidbody(space, ground);
+
+    #ifdef PLATFORM_WEB
+    emscripten_set_main_loop(updateDrawFrame, 120, 1);
+    #else
+    SetTargetFPS(60);
+
+    while(!WindowShouldClose()){
+        updateDrawFrame();
+
+
+    }   
+    #endif
+
     for (int i = 0; i < NUM_ROCKETS; i++)
     {
         free(allRockets[i]);
     }
     free(allRockets);
+    nvSpace_free(space);
     CloseWindow();
     return 0;
 }
