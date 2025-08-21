@@ -5,5 +5,4 @@ code/
 node_modules/
 package-lock.json
 ignore/
-web/*
 !web/
